@@ -97,7 +97,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: RogerPazzagliniCeo8earn/MMcrm-Infrastructure
-          ref: acc7a8ea94f4d39007692a7394278814c13484b8
+          ref: d624e9818fa074347b0ce7f51089da9e66ac5aa4
           token: ${{ steps.source-token.outputs.token }}
           path: private-controller
           sparse-checkout: |

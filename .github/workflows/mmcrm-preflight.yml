@@ -60,9 +60,12 @@ jobs:
           gh api --paginate --slurp "repos/RogerPazzagliniCeo8earn/MegaMonitor/commits/df195e6da70206bdd2e690507558a63eaa3705e5/check-runs?per_page=100" |
             jq '{total_count: ([.[].total_count] | add), check_runs: [.[].check_runs[]]}' > "$RUNNER_TEMP/checks.json"
           python3 ops/broker/guard.py --verify-source "$RUNNER_TEMP/pr.json" "$RUNNER_TEMP/commit.json" "$RUNNER_TEMP/status.json" "$RUNNER_TEMP/checks.json"
-      - name: Download private source and regenerate the filtered CRM archive
+      - name: Build the private CRM archive and obtain a server-side preflight challenge
         env:
           GH_TOKEN: ${{ steps.source-token.outputs.token }}
+          SSH_PRIVATE_KEY: ${{ secrets.MMCRM_PREFLIGHT_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.MMCRM_SSH_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.MMCRM_DEPLOY_HOST }}
         shell: bash
         run: |
           set -euo pipefail
@@ -73,30 +76,7 @@ jobs:
           python3 private-controller/ops/updates/prepare-mmcrm-pr20-archive.py --prepare "$raw" "$archive" > "$prepared"
           content_sha=$(sed -n 's/.*content_sha256=\([0-9a-f]\{64\}\).*/\1/p' "$prepared")
           archive_sha=$(sha256sum "$archive" | awk '{print $1}')
-          python3 ops/broker/guard.py --write-manifest "$RUNNER_TEMP/deployment-manifest.json" \
-            "$GITHUB_RUN_ID" "$GITHUB_SHA" "$content_sha" "$archive_sha" \
-            df195e6da70206bdd2e690507558a63eaa3705e5 81791ad20819d34990ba37a0678e292f9db02e44 20
-          rm -f "$raw" "$archive" "$prepared"
-          {
-            echo '## MMcrm Preflight target'
-            echo
-            echo "- Preflight run: `$GITHUB_RUN_ID`"
-            echo "- Broker commit: `$GITHUB_SHA`"
-            echo '- Application PR: #20'
-            echo '- Application commit: `df195e6da70206bdd2e690507558a63eaa3705e5`'
-            echo '- Application tree: `81791ad20819d34990ba37a0678e292f9db02e44`'
-            echo "- Filtered content SHA-256: `$content_sha`"
-            echo "- Filtered archive SHA-256: `$archive_sha`"
-            echo '- The source archive is not stored as a workflow artifact.'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Run the controller's read-only VPS preflight
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.MMCRM_PREFLIGHT_SSH_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.MMCRM_SSH_KNOWN_HOSTS }}
-          DEPLOY_HOST: ${{ vars.MMCRM_DEPLOY_HOST }}
-        shell: bash
-        run: |
-          set -euo pipefail
+          [[ "$content_sha" =~ ^[0-9a-f]{64}$ && "$archive_sha" =~ ^[0-9a-f]{64}$ ]]
           [[ -n "$SSH_PRIVATE_KEY" && -n "$SSH_KNOWN_HOSTS" && -n "$DEPLOY_HOST" ]]
           umask 077
           ssh_dir="$RUNNER_TEMP/mmcrm-preflight-ssh"
@@ -104,18 +84,32 @@ jobs:
           printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/key"
           printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
           chmod 0600 "$ssh_dir/key" "$ssh_dir/known_hosts"
-          out="$RUNNER_TEMP/preflight.out"
-          if ! ssh -T -i "$ssh_dir/key" -o BatchMode=yes -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
-            "mmcrm-deploy@$DEPLOY_HOST" > "$out" 2> "$RUNNER_TEMP/preflight.err"; then
-            echo 'Read-only SSH preflight failed; remote output suppressed.' >&2
-            exit 1
-          fi
+          out="$RUNNER_TEMP/preflight-challenge.out"
+          printf 'challenge %s %s %s %s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" "$content_sha" "$archive_sha" |
+            ssh -T -i "$ssh_dir/key" -o BatchMode=yes -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+              "mmcrm-deploy@$DEPLOY_HOST" > "$out" 2> "$RUNNER_TEMP/preflight.err"
           grep -Fxq 'UPGRADE_PREFLIGHT_OK source=2440217d20e03e767b90810c1e9968a4dfc2984c target=df195e6da70206bdd2e690507558a63eaa3705e5 service=active bind=loopback database=present config=preserved' "$out" || {
             echo 'Expected read-only preflight marker was not returned.' >&2; exit 1;
           }
-          echo 'MMCRM_READ_ONLY_PREFLIGHT_OK' >> "$GITHUB_STEP_SUMMARY"
-          rm -f "$ssh_dir/key" "$ssh_dir/known_hosts" "$out" "$RUNNER_TEMP/preflight.err"
+          tail -n 1 "$out" > "$RUNNER_TEMP/deployment-manifest.json"
+          python3 ops/broker/guard.py --verify-manifest "$RUNNER_TEMP/deployment-manifest.json" "$GITHUB_RUN_ID" "$GITHUB_SHA"
+          python3 - "$RUNNER_TEMP/deployment-manifest.json" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json,sys
+          m=json.load(open(sys.argv[1],encoding="utf-8"))
+          print("## MMcrm signed approval request\n")
+          print(f"- Preflight run: `{m['preflight_run_id']}`")
+          print(f"- Broker commit: `{m['broker_sha']}`")
+          print(f"- Application PR: `#{m['app_pr']}`")
+          print(f"- Application commit: `{m['app_commit']}`")
+          print(f"- Application tree: `{m['app_tree']}`")
+          print(f"- VPS read-only preflight SHA-256: `{m['preflight_sha256']}`")
+          print(f"- CRM-only content SHA-256: `{m['content_sha256']}`")
+          print(f"- CRM-only archive SHA-256: `{m['archive_sha256']}`")
+          print(f"- Authorization challenge expires: `{m['expires_at']}` (Unix time)")
+          print("\nDownload the challenge artifact and sign it locally. The archive is not uploaded.")
+          PY
+          rm -f "$raw" "$archive" "$prepared" "$ssh_dir/key" "$ssh_dir/known_hosts" "$RUNNER_TEMP/preflight.err"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: mmcrm-preflight-${{ github.run_id }}

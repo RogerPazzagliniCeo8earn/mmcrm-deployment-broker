@@ -6,6 +6,7 @@ import base64
 import json
 import shutil
 import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -111,6 +112,34 @@ class BrokerGuardTests(unittest.TestCase):
             altered = payload.read_bytes().replace(b'"archive_sha256":"' + b"c" * 64, b'"archive_sha256":"' + b"e" * 64)
             invalid = subprocess.run([ssh_keygen, "-Y", "verify", "-f", str(allowed), "-I", "mmcrm-owner", "-n", "mmcrm-deploy-v1", "-s", str(signature)], input=altered, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self.assertNotEqual(invalid.returncode, 0)
+
+    def test_local_authorize_command_requires_commit_confirmation_and_emits_signed_envelope(self):
+        ssh_keygen = shutil.which("ssh-keygen")
+        if not ssh_keygen:
+            self.skipTest("OpenSSH ssh-keygen is unavailable")
+        value = {
+            "format": 1, "challenge": "q" * 40, "nonce": "r" * 40,
+            "expires_at": int(time.time()) + 1200, "preflight_run_id": "123456",
+            "broker_sha": "a" * 40, "app_pr": APP_PR, "app_commit": APP_COMMIT,
+            "app_tree": APP_TREE, "preflight_sha256": "d" * 64,
+            "content_sha256": "b" * 64, "archive_sha256": "c" * 64,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); challenge = root / "challenge.json"; key = root / "owner"
+            output = root / "approval.json"
+            challenge.write_bytes((json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode())
+            subprocess.run([ssh_keygen, "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
+            script = ROOT / "ops/broker/authorize.py"
+            declined = subprocess.run([sys.executable, str(script), str(challenge), str(key), str(output)],
+                                      input=("0" * 40 + "\n").encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertNotEqual(declined.returncode, 0)
+            self.assertFalse(output.exists())
+            accepted = subprocess.run([sys.executable, str(script), str(challenge), str(key), str(output)],
+                                      input=(APP_COMMIT + "\n").encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr.decode(errors="replace"))
+            envelope = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(set(envelope), {"format", "payload_b64", "signature_b64"})
+            self.assertIn(b"Exact archive SHA-256", accepted.stdout)
 
     def test_vps_reference_requires_signed_exact_archive_and_consumes_grant_once(self):
         ssh_keygen = shutil.which("ssh-keygen")

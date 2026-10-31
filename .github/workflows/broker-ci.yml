@@ -24,12 +24,18 @@ jobs:
           python3 ops/broker/guard.py --self-test
           python3 - <<'PY'
           from pathlib import Path
+          import re
           p=Path('.github/workflows/mmcrm-preflight.yml').read_text()
           a=Path('.github/workflows/mmcrm-apply.yml').read_text()
           assert 'MMCRM_APPLY_SSH_KEY' not in p
           assert a.count('secrets.MMCRM_APPLY_SSH_KEY') == 1
           assert 'environment: mmcrm-apply' in a
           assert a.index('environment: mmcrm-apply') < a.index('secrets.MMCRM_APPLY_SSH_KEY')
+          apply_job = a.split('  apply:', 1)[1]
+          assert 'needs: validate' in apply_job
+          assert "if: github.ref == 'refs/heads/main' && github.actor == 'RogerPazzagliniCeo8earn'" in apply_job
+          validate_job = a.split('  validate:', 1)[1].split('  apply:', 1)[0]
+          assert 'secrets.MMCRM_APPLY_SSH_KEY' not in validate_job
           assert 'source-crm-only.tar.gz' not in p.split('uses: actions/upload-artifact',1)[1].split('\n      - ',1)[0]
           assert 'pull_request_' + 'target' not in p+a
           assert 'runs-on: self-' + 'hosted' not in p+a

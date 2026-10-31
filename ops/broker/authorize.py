@@ -81,7 +81,7 @@ def create_approval(challenge_path: Path, private_key: Path, output: Path) -> No
     # command-line arguments or an environment variable.
     result = subprocess.run(
         [ssh_keygen, "-Y", "sign", "-f", str(private_key), "-n", "mmcrm-deploy-v1", str(challenge_path)],
-        stdin=None, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False,
+        stdin=None, stdout=subprocess.DEVNULL, stderr=None, check=False,
     )
     signature_path = Path(str(challenge_path) + ".sig")
     try:

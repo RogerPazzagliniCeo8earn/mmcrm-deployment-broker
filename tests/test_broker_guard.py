@@ -280,6 +280,13 @@ class BrokerGuardTests(unittest.TestCase):
         self.assertIn("path: ${{ runner.temp }}/deployment-manifest.json", upload_block)
         self.assertNotIn("uses: actions/upload-artifact", apply)
 
+    def test_workflows_pin_the_reviewed_private_controller_commit(self):
+        pin = "ref: d624e9818fa074347b0ce7f51089da9e66ac5aa4"
+        for name in ("mmcrm-preflight.yml", "mmcrm-apply.yml"):
+            content = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+            with self.subTest(workflow=name):
+                self.assertEqual(content.count(pin), 1)
+
     def test_workflow_mutations_cannot_replace_vps_signature_gate(self):
         preflight = (ROOT / ".github/workflows/mmcrm-preflight.yml").read_text(encoding="utf-8")
         apply = (ROOT / ".github/workflows/mmcrm-apply.yml").read_text(encoding="utf-8")

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import re
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -17,7 +19,8 @@ APP_COMMIT = "df195e6da70206bdd2e690507558a63eaa3705e5"
 APP_TREE = "81791ad20819d34990ba37a0678e292f9db02e44"
 PREFLIGHT_PATH = ".github/workflows/mmcrm-preflight.yml"
 MANIFEST_FIELDS = {
-    "format", "run_id", "broker_sha", "app_pr", "app_commit", "app_tree",
+    "format", "challenge", "nonce", "expires_at", "preflight_run_id",
+    "broker_sha", "app_pr", "app_commit", "app_tree", "preflight_sha256",
     "content_sha256", "archive_sha256",
 }
 SHA40 = re.compile(r"[0-9a-f]{40}\Z")
@@ -59,15 +62,34 @@ def read_json(path: str) -> dict:
 def validate_manifest(value: dict, run_id: str, broker_sha: str) -> dict:
     reject(set(value) == MANIFEST_FIELDS, "manifest_fields_mismatch")
     reject(value.get("format") == 1, "manifest_version_mismatch")
-    reject(isinstance(value.get("run_id"), str) and RUN_ID.fullmatch(value["run_id"]), "manifest_run_id_invalid")
-    reject(value["run_id"] == run_id, "manifest_run_id_mismatch")
+    reject(isinstance(value.get("challenge"), str) and re.fullmatch(r"[A-Za-z0-9_-]{32,128}", value["challenge"]), "manifest_challenge_invalid")
+    reject(isinstance(value.get("nonce"), str) and re.fullmatch(r"[A-Za-z0-9_-]{32,128}", value["nonce"]), "manifest_nonce_invalid")
+    current = int(time.time())
+    reject(isinstance(value.get("expires_at"), int) and current < value["expires_at"] <= current + 1800, "manifest_expiry_invalid")
+    reject(isinstance(value.get("preflight_run_id"), str) and RUN_ID.fullmatch(value["preflight_run_id"]), "manifest_run_id_invalid")
+    reject(value["preflight_run_id"] == run_id, "manifest_run_id_mismatch")
     reject(value.get("broker_sha") == broker_sha and SHA40.fullmatch(broker_sha), "manifest_broker_sha_mismatch")
     reject(value.get("app_pr") == APP_PR, "manifest_pr_mismatch")
     reject(value.get("app_commit") == APP_COMMIT, "manifest_commit_mismatch")
     reject(value.get("app_tree") == APP_TREE, "manifest_tree_mismatch")
-    reject(isinstance(value.get("content_sha256"), str) and SHA64.fullmatch(value["content_sha256"]), "manifest_content_hash_invalid")
-    reject(isinstance(value.get("archive_sha256"), str) and SHA64.fullmatch(value["archive_sha256"]), "manifest_archive_hash_invalid")
+    for field in ("preflight_sha256", "content_sha256", "archive_sha256"):
+        reject(isinstance(value.get(field), str) and SHA64.fullmatch(value[field]), "manifest_digest_invalid")
     return value
+
+
+def validate_envelope(path: str, manifest_path: str, run_id: str, broker_sha: str) -> None:
+    envelope = read_json(path)
+    reject(set(envelope) == {"format", "payload_b64", "signature_b64"} and envelope.get("format") == 1,
+           "authorization_envelope_invalid")
+    try:
+        payload = base64.b64decode(envelope["payload_b64"], validate=True)
+        signature = base64.b64decode(envelope["signature_b64"], validate=True)
+    except Exception:
+        raise Reject("authorization_encoding_invalid") from None
+    manifest = validate_manifest(read_json(manifest_path), run_id, broker_sha)
+    expected = (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    reject(payload == expected, "authorization_payload_mismatch")
+    reject(64 <= len(signature) <= 16_384, "authorization_signature_size_invalid")
 
 
 def validate_run(run: dict, run_id: str, broker_sha: str, actor: str = OWNER) -> None:
@@ -111,9 +133,10 @@ def validate_redirect(url: str) -> None:
 
 def self_test() -> None:
     manifest = {
-        "format": 1, "run_id": "41192707703", "broker_sha": "a" * 40,
+        "format": 1, "challenge": "c" * 40, "nonce": "n" * 40,
+        "expires_at": int(time.time()) + 1200, "preflight_run_id": "41192707703", "broker_sha": "a" * 40,
         "app_pr": APP_PR, "app_commit": APP_COMMIT, "app_tree": APP_TREE,
-        "content_sha256": "b" * 64, "archive_sha256": "c" * 64,
+        "preflight_sha256": "d" * 64, "content_sha256": "b" * 64, "archive_sha256": "c" * 64,
     }
     run = {
         "id": 41192707703, "event": "workflow_dispatch", "path": PREFLIGHT_PATH,
@@ -138,7 +161,7 @@ def self_test() -> None:
     mutations = [
         (lambda m: m.update(app_commit="0" * 40), "manifest_commit_mismatch"),
         (lambda m: m.update(unexpected_archive="private-bytes"), "manifest_fields_mismatch"),
-        (lambda m: m.update(archive_sha256="../path"), "manifest_archive_hash_invalid"),
+        (lambda m: m.update(archive_sha256="../path"), "manifest_digest_invalid"),
     ]
     for mutate, reason in mutations:
         bad = dict(manifest); mutate(bad)
@@ -185,9 +208,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--verify-manifest", nargs=3, metavar=("FILE", "RUN_ID", "BROKER_SHA"))
+    parser.add_argument("--verify-envelope", nargs=4, metavar=("ENVELOPE", "MANIFEST", "RUN_ID", "BROKER_SHA"))
     parser.add_argument("--verify-run", nargs=4, metavar=("FILE", "RUN_ID", "BROKER_SHA", "ACTOR"))
     parser.add_argument("--verify-source", nargs=4, metavar=("PR_JSON", "COMMIT_JSON", "STATUS_JSON", "CHECKS_JSON"))
-    parser.add_argument("--write-manifest", nargs=8, metavar=("FILE", "RUN_ID", "BROKER_SHA", "CONTENT_SHA", "ARCHIVE_SHA", "COMMIT", "TREE", "PR"))
     parser.add_argument("--validate-redirect")
     args = parser.parse_args()
     try:
@@ -198,6 +221,11 @@ def main() -> int:
             validate_manifest(read_json(path), run_id, sha)
             print("BROKER_MANIFEST_OK")
             return 0
+        if args.verify_envelope:
+            envelope_path, manifest_path, run_id, sha = args.verify_envelope
+            validate_envelope(envelope_path, manifest_path, run_id, sha)
+            print("BROKER_AUTHORIZATION_PAYLOAD_OK")
+            return 0
         if args.verify_run:
             path, run_id, sha, actor = args.verify_run
             validate_run(read_json(path), run_id, sha, actor)
@@ -206,14 +234,6 @@ def main() -> int:
             pr_path, commit_path, status_path, checks_path = args.verify_source
             validate_source(read_json(pr_path), read_json(status_path), read_json(checks_path), read_json(commit_path))
             print("BROKER_SOURCE_OK")
-            return 0
-        if args.write_manifest:
-            path, run_id, broker_sha, content_sha, archive_sha, commit, tree, pr = args.write_manifest
-            value = {"format": 1, "run_id": run_id, "broker_sha": broker_sha,
-                     "app_pr": int(pr), "app_commit": commit, "app_tree": tree,
-                     "content_sha256": content_sha, "archive_sha256": archive_sha}
-            validate_manifest(value, run_id, broker_sha)
-            Path(path).write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
             return 0
         if args.validate_redirect:
             validate_redirect(args.validate_redirect)

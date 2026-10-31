@@ -1,0 +1,118 @@
+name: MMcrm deployment preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_pr:
+        description: Pinned CRM application PR
+        required: true
+        default: '20'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mmcrm-deployment-preflight-${{ inputs.app_pr }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: github.ref == 'refs/heads/main' && github.actor == 'RogerPazzagliniCeo8earn'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b # v2.1.4
+        id: source-token
+        with:
+          app-id: ${{ vars.MMCRM_SOURCE_APP_ID }}
+          private-key: ${{ secrets.MMCRM_SOURCE_APP_PRIVATE_KEY }}
+          owner: RogerPazzagliniCeo8earn
+          repositories: MegaMonitor,MMcrm-Infrastructure
+          permission-contents: read
+          permission-pull-requests: read
+          permission-actions: read
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: RogerPazzagliniCeo8earn/MMcrm-Infrastructure
+          ref: d624e9818fa074347b0ce7f51089da9e66ac5aa4
+          token: ${{ steps.source-token.outputs.token }}
+          path: private-controller
+          sparse-checkout: |
+            ops/updates/prepare-mmcrm-pr20-archive.py
+            ops/updates/mmcrm-deploy-manifest.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Verify application PR, commit, tree, and all CI checks
+        env:
+          GH_TOKEN: ${{ steps.source-token.outputs.token }}
+          APP_PR: ${{ inputs.app_pr }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$APP_PR" == 20 ]] || { echo 'Pinned application PR is #20.' >&2; exit 1; }
+          gh api "repos/RogerPazzagliniCeo8earn/MegaMonitor/pulls/$APP_PR" > "$RUNNER_TEMP/pr.json"
+          gh api "repos/RogerPazzagliniCeo8earn/MegaMonitor/commits/df195e6da70206bdd2e690507558a63eaa3705e5" > "$RUNNER_TEMP/commit.json"
+          gh api "repos/RogerPazzagliniCeo8earn/MegaMonitor/commits/df195e6da70206bdd2e690507558a63eaa3705e5/status" > "$RUNNER_TEMP/status.json"
+          gh api --paginate --slurp "repos/RogerPazzagliniCeo8earn/MegaMonitor/commits/df195e6da70206bdd2e690507558a63eaa3705e5/check-runs?per_page=100" |
+            jq '{total_count: ([.[].total_count] | add), check_runs: [.[].check_runs[]]}' > "$RUNNER_TEMP/checks.json"
+          python3 ops/broker/guard.py --verify-source "$RUNNER_TEMP/pr.json" "$RUNNER_TEMP/commit.json" "$RUNNER_TEMP/status.json" "$RUNNER_TEMP/checks.json"
+      - name: Build the private CRM archive and obtain a server-side preflight challenge
+        env:
+          GH_TOKEN: ${{ steps.source-token.outputs.token }}
+          SSH_PRIVATE_KEY: ${{ secrets.MMCRM_PREFLIGHT_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.MMCRM_SSH_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.MMCRM_DEPLOY_HOST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw="$RUNNER_TEMP/source-real.tar.gz"
+          archive="$RUNNER_TEMP/source-crm-only.tar.gz"
+          prepared="$RUNNER_TEMP/prepare.log"
+          python3 ops/broker/fetch_source.py "$raw"
+          python3 private-controller/ops/updates/prepare-mmcrm-pr20-archive.py --prepare "$raw" "$archive" > "$prepared"
+          content_sha=$(sed -n 's/.*content_sha256=\([0-9a-f]\{64\}\).*/\1/p' "$prepared")
+          archive_sha=$(sha256sum "$archive" | awk '{print $1}')
+          [[ "$content_sha" =~ ^[0-9a-f]{64}$ && "$archive_sha" =~ ^[0-9a-f]{64}$ ]]
+          [[ -n "$SSH_PRIVATE_KEY" && -n "$SSH_KNOWN_HOSTS" && -n "$DEPLOY_HOST" ]]
+          umask 077
+          ssh_dir="$RUNNER_TEMP/mmcrm-preflight-ssh"
+          install -d -m 0700 "$ssh_dir"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 0600 "$ssh_dir/key" "$ssh_dir/known_hosts"
+          out="$RUNNER_TEMP/preflight-challenge.out"
+          printf 'challenge %s %s %s %s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" "$content_sha" "$archive_sha" |
+            ssh -T -i "$ssh_dir/key" -o BatchMode=yes -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+              "mmcrm-deploy@$DEPLOY_HOST" > "$out" 2> "$RUNNER_TEMP/preflight.err"
+          grep -Fxq 'UPGRADE_PREFLIGHT_OK source=2440217d20e03e767b90810c1e9968a4dfc2984c target=df195e6da70206bdd2e690507558a63eaa3705e5 service=active bind=loopback database=present config=preserved' "$out" || {
+            echo 'Expected read-only preflight marker was not returned.' >&2; exit 1;
+          }
+          tail -n 1 "$out" > "$RUNNER_TEMP/deployment-manifest.json"
+          python3 ops/broker/guard.py --verify-manifest "$RUNNER_TEMP/deployment-manifest.json" "$GITHUB_RUN_ID" "$GITHUB_SHA"
+          python3 - "$RUNNER_TEMP/deployment-manifest.json" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json,sys
+          m=json.load(open(sys.argv[1],encoding="utf-8"))
+          print("## MMcrm signed approval request\n")
+          print(f"- Preflight run: `{m['preflight_run_id']}`")
+          print(f"- Broker commit: `{m['broker_sha']}`")
+          print(f"- Application PR: `#{m['app_pr']}`")
+          print(f"- Application commit: `{m['app_commit']}`")
+          print(f"- Application tree: `{m['app_tree']}`")
+          print(f"- VPS read-only preflight SHA-256: `{m['preflight_sha256']}`")
+          print(f"- CRM-only content SHA-256: `{m['content_sha256']}`")
+          print(f"- CRM-only archive SHA-256: `{m['archive_sha256']}`")
+          print(f"- Authorization challenge expires: `{m['expires_at']}` (Unix time)")
+          print("\nDownload the challenge artifact and sign it locally. The archive is not uploaded.")
+          PY
+          rm -f "$raw" "$archive" "$prepared" "$ssh_dir/key" "$ssh_dir/known_hosts" "$RUNNER_TEMP/preflight.err"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mmcrm-preflight-${{ github.run_id }}
+          path: ${{ runner.temp }}/deployment-manifest.json
+          if-no-files-found: error
+          retention-days: 2

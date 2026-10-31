@@ -1,0 +1,66 @@
+name: MMcrm broker CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  linux-broker-ci:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Static checks and adversarial gate regressions
+        run: |
+          set -euo pipefail
+          python3 -m py_compile ops/broker/*.py tests/test_broker_guard.py
+          python3 -m unittest discover -s tests -p 'test_broker_guard.py' -v
+          python3 ops/broker/guard.py --self-test
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('.github/workflows/mmcrm-preflight.yml').read_text()
+          a=Path('.github/workflows/mmcrm-apply.yml').read_text()
+          assert 'MMCRM_APPLY_SSH_KEY' not in p
+          assert a.count('secrets.MMCRM_APPLY_SSH_KEY') == 1
+          assert 'environment: mmcrm-apply' not in a
+          assert '--verify-envelope' in a
+          assert "printf 'apply %s\\n' \"$grant_b64\"" in a
+          assert 'MMCRM_APPROVAL_CREATED' in Path('ops/broker/authorize.py').read_text()
+          apply_job = a.split('  apply:', 1)[1]
+          assert 'needs: validate' in apply_job
+          assert "if: github.ref == 'refs/heads/main' && github.actor == 'RogerPazzagliniCeo8earn'" in apply_job
+          validate_job = a.split('  validate:', 1)[1].split('  apply:', 1)[0]
+          assert 'secrets.MMCRM_APPLY_SSH_KEY' not in validate_job
+          assert 'source-crm-only.tar.gz' not in p.split('uses: actions/upload-artifact',1)[1].split('\n      - ',1)[0]
+          assert 'pull_request_' + 'target' not in p+a
+          assert 'runs-on: self-' + 'hosted' not in p+a
+          print('BROKER_WORKFLOW_STATIC_GUARDS_OK')
+          PY
+
+  windows-powershell-51:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Run broker adversarial regressions under Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5) { throw 'Expected Windows PowerShell 5.1.' }
+          python --version
+          if (-not (Get-Command ssh-keygen -ErrorAction SilentlyContinue)) { throw 'OpenSSH ssh-keygen is required for signing regressions.' }
+          python -m py_compile ops/broker/guard.py ops/broker/fetch_source.py ops/broker/authorize.py ops/broker/vps_authorization_reference.py tests/test_broker_guard.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p test_broker_guard.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python ops/broker/guard.py --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host 'WINDOWS_POWERSHELL_51_BROKER_TESTS_OK'

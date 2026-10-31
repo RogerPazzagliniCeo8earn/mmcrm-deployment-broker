@@ -1,6 +1,6 @@
 # MMcrm deployment broker
 
-Deployment orchestration belongs in a separate public repository because the current GitHub Free plan does not provide required Environment reviewers or branch protection for this private repository. Keep `MegaMonitor` and `MMcrm-Infrastructure` private. This repository contains the fixed controller and tests only; it has no deployment workflow and stores no deployment credentials.
+Deployment orchestration lives in this public, code-only broker because GitHub Free supports required Environment reviewers and branch protection on public repositories, while the application and infrastructure repositories remain private. Keep `MegaMonitor` and `MMcrm-Infrastructure` private. This repository contains only workflow orchestration, validation code, tests, and documentation; it contains no MMcrm application source, private archive, controller bundle, SSH key material, deployment artifact, or customer data.
 
 ## Approval model
 
@@ -20,7 +20,7 @@ The GitHub owner remains the administrative trust root and can change repository
 
 ## One-time activation checklist (not performed by this PR)
 
-1. Create the public broker repository with only the reviewed orchestration code. Verify `MegaMonitor` and `MMcrm-Infrastructure` remain private.
+1. Verify this public broker contains only the reviewed orchestration code and that `MegaMonitor` and `MMcrm-Infrastructure` remain private.
 2. Protect broker `main` with PR-only changes, one independent approval, dismissal of stale approvals, approval of the latest push, and required `linux-broker-ci` / `windows-powershell-51` checks; enforce for administrators, and disallow force push and deletion.
 3. Create Environment `mmcrm-apply`; set required reviewer to a distinct trusted account, enable **Prevent self-review**, disable administrator bypass, and restrict deployment branches to `main`.
 4. Install a read-only GitHub App on the two private repositories, limited to Contents, Pull requests, and Actions read. Store its App ID and private key as broker repository variable/secret used only for private-source validation and downloads.

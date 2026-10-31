@@ -164,7 +164,7 @@ class BrokerGuardTests(unittest.TestCase):
 
     def test_public_tree_contains_only_orchestration_code_docs_and_tests(self):
         allowed = {"README.md", ".github", "ops", "tests", "docs"}
-        self.assertLessEqual({p.name for p in ROOT.iterdir()}, allowed)
+        self.assertLessEqual({p.name for p in ROOT.iterdir() if p.name != ".git"}, allowed)
         for path in ROOT.rglob("*"):
             if path.is_file():
                 self.assertNotIn(path.suffix.lower(), {".tar", ".gz", ".zip", ".db", ".sqlite", ".pem", ".key"})

@@ -63,7 +63,7 @@ class BrokerGuardTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "challenge.json"
-            path.write_text(json.dumps(challenge, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+            path.write_bytes((json.dumps(challenge, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8"))
             parsed, payload = canonical_payload(path)
             self.assertEqual(set(parsed), AUTH_FIELDS)
             self.assertEqual(payload, path.read_bytes())
@@ -74,11 +74,11 @@ class BrokerGuardTests(unittest.TestCase):
                 lambda value: value.update(extra="ignored"),
             ):
                 bad = dict(challenge); mutate(bad)
-                path.write_text(json.dumps(bad, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+                path.write_bytes((json.dumps(bad, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8"))
                 with self.subTest(challenge=bad):
                     with self.assertRaises(AuthReject):
                         canonical_payload(path)
-            path.write_text(json.dumps(challenge, separators=(",", ":")) + "\n", encoding="utf-8")
+            path.write_bytes((json.dumps(challenge, separators=(",", ":")) + "\n").encode("utf-8"))
             with self.assertRaises(AuthReject) as raised:
                 canonical_payload(path)
             self.assertEqual(raised.exception.reason, "challenge_not_canonical")

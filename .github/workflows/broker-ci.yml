@@ -67,7 +67,7 @@ jobs:
           if (-not (Get-Command ssh-keygen -ErrorAction SilentlyContinue)) { throw 'OpenSSH ssh-keygen is required for signing regressions.' }
           python -m py_compile ops/broker/guard.py ops/broker/fetch_source.py ops/broker/authorize.py ops/broker/vps_authorization_reference.py tests/test_broker_guard.py tests/test_source_app_workflow.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m unittest discover -s tests -p test_*.py -v
+          python -m unittest discover -s tests -p 'test_*.py' -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python ops/broker/guard.py --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

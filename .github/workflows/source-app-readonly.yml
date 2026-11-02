@@ -1,0 +1,63 @@
+name: MMcrm source App read-only verification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mmcrm-source-app-readonly-verification
+  cancel-in-progress: false
+
+jobs:
+  verify-private-source-read:
+    if: github.ref == 'refs/heads/main' && github.actor == 'RogerPazzagliniCeo8earn'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b # v2.1.4
+        id: source-app-token
+        with:
+          app-id: ${{ vars.MMCRM_SOURCE_APP_ID }}
+          private-key: ${{ secrets.MMCRM_SOURCE_APP_PRIVATE_KEY }}
+          owner: RogerPazzagliniCeo8earn
+          repositories: MegaMonitor,MMcrm-Infrastructure
+          permission-contents: read
+          permission-pull-requests: read
+          permission-actions: read
+      - name: Verify private repository contents access without displaying responses
+        env:
+          GH_TOKEN: ${{ steps.source-app-token.outputs.token }}
+          GH_PROMPT_DISABLED: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          response_dir=$(mktemp -d)
+          trap 'rm -rf "$response_dir"' EXIT
+          if ! gh api 'repos/RogerPazzagliniCeo8earn/MegaMonitor/contents/package.json?ref=main' > "$response_dir/megamonitor.json" 2>/dev/null; then
+            echo 'MMCRM_SOURCE_APP_READ_FAILED repository_check=1' >&2
+            exit 1
+          fi
+          if ! gh api 'repos/RogerPazzagliniCeo8earn/MMcrm-Infrastructure/contents/ops/updates/mmcrm-deploy-authorization.py?ref=main' > "$response_dir/infrastructure.json" 2>/dev/null; then
+            echo 'MMCRM_SOURCE_APP_READ_FAILED repository_check=2' >&2
+            exit 1
+          fi
+          python3 - "$response_dir/megamonitor.json" "$response_dir/infrastructure.json" <<'PY'
+          import json, re, sys
+          expected = [
+              ("RogerPazzagliniCeo8earn/MegaMonitor", "package.json"),
+              ("RogerPazzagliniCeo8earn/MMcrm-Infrastructure", "ops/updates/mmcrm-deploy-authorization.py"),
+          ]
+          for path, (repository, file_path) in zip(sys.argv[1:], expected):
+              with open(path, encoding="utf-8") as stream:
+                  item = json.load(stream)
+              if (item.get("type") != "file" or item.get("path") != file_path
+                      or not re.fullmatch(r"[0-9a-f]{40}", item.get("sha", ""))):
+                  raise SystemExit("Private repository content response did not match the expected file metadata.")
+          print("MMCRM_SOURCE_APP_READ_OK repositories=2 contents=read")
+          PY

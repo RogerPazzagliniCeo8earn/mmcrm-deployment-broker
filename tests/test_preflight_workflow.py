@@ -29,7 +29,7 @@ class PreflightWorkflowPermissionTests(unittest.TestCase):
         self.assertNotRegex(token_block, r"(?m)^          permission-[a-z-]+: write$")
 
     def test_each_api_endpoint_has_its_minimum_read_permission_and_safe_failure_label(self):
-        self.assertIn('read_api pr "repos/RogerPazzagliniCeo8earn/MegaMonitor/pulls/$APP_PR"', self.workflow)
+        self.assertIn('gh api "repos/RogerPazzagliniCeo8earn/MegaMonitor/pulls/$APP_PR" |', self.workflow)
         self.assertIn('read_api commit "repos/RogerPazzagliniCeo8earn/MegaMonitor/commits/df195e6da70206bdd2e690507558a63eaa3705e5"', self.workflow)
         self.assertIn('read_api commit_status "repos/RogerPazzagliniCeo8earn/MegaMonitor/commits/df195e6da70206bdd2e690507558a63eaa3705e5/status"', self.workflow)
         self.assertIn('endpoint=check_runs', self.workflow)

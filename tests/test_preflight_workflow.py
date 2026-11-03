@@ -55,7 +55,7 @@ class PreflightWorkflowPermissionTests(unittest.TestCase):
             with self.subTest(field=required_field):
                 self.assertIn(required_field, projection)
         guard = (ROOT / "ops/broker/guard.py").read_text(encoding="utf-8")
-        self.assertIn("reject(len(raw) <= 16_384, \\"input_too_large\\")", guard)
+        self.assertIn('reject(len(raw) <= 16_384, "input_too_large")', guard)
 
 
 if __name__ == "__main__":

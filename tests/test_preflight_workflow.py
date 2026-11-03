@@ -47,6 +47,16 @@ class PreflightWorkflowPermissionTests(unittest.TestCase):
         self.assertIn("SSH_PRIVATE_KEY: ${{ secrets.MMCRM_PREFLIGHT_SSH_KEY }}", self.workflow)
         self.assertIn("mmcrm-deploy@$DEPLOY_HOST", self.workflow)
 
+    def test_large_pull_response_is_projected_to_only_guard_required_fields(self):
+        projection = "jq -c '{number, state, draft, base: {ref: .base.ref}, head: {sha: .head.sha, repo: {full_name: .head.repo.full_name}}}'"
+        self.assertIn(projection, self.workflow)
+        self.assertIn('> "$RUNNER_TEMP/pr.json"', self.workflow)
+        for required_field in ("number", "state", "draft", "base.ref", "head.sha", "head.repo.full_name"):
+            with self.subTest(field=required_field):
+                self.assertIn(required_field, projection)
+        guard = (ROOT / "ops/broker/guard.py").read_text(encoding="utf-8")
+        self.assertIn("reject(len(raw) <= 16_384, \\"input_too_large\\")", guard)
+
 
 if __name__ == "__main__":
     unittest.main()

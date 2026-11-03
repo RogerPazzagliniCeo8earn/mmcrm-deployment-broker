@@ -39,7 +39,7 @@ jobs:
           assert "if: github.ref == 'refs/heads/main' && github.actor == 'RogerPazzagliniCeo8earn'" in apply_job
           validate_job = a.split('  validate:', 1)[1].split('  apply:', 1)[0]
           assert 'secrets.MMCRM_APPLY_SSH_KEY' not in validate_job
-          assert 'source-crm-only.tar.gz' not in p.split('uses: actions/upload-artifact',1)[1].split('\\n      - ',1)[0]
+          assert 'source-crm-only.tar.gz' not in p.split('uses: actions/upload-artifact',1)[1].split('\n      - ',1)[0]
           assert 'pull_request_' + 'target' not in p+a+s
           assert 'runs-on: self-' + 'hosted' not in p+a+s
           assert 'workflow_dispatch:' in s

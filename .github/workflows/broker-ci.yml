@@ -19,7 +19,7 @@ jobs:
       - name: Static checks and adversarial gate regressions
         run: |
           set -euo pipefail
-          python3 -m py_compile ops/broker/*.py tests/test_broker_guard.py tests/test_source_app_workflow.py
+          python3 -m py_compile ops/broker/*.py tests/test_broker_guard.py tests/test_source_app_workflow.py tests/test_preflight_workflow.py
           python3 -m unittest discover -s tests -p 'test_*.py' -v
           python3 ops/broker/guard.py --self-test
           python3 - <<'PY'
@@ -39,7 +39,7 @@ jobs:
           assert "if: github.ref == 'refs/heads/main' && github.actor == 'RogerPazzagliniCeo8earn'" in apply_job
           validate_job = a.split('  validate:', 1)[1].split('  apply:', 1)[0]
           assert 'secrets.MMCRM_APPLY_SSH_KEY' not in validate_job
-          assert 'source-crm-only.tar.gz' not in p.split('uses: actions/upload-artifact',1)[1].split('\n      - ',1)[0]
+          assert 'source-crm-only.tar.gz' not in p.split('uses: actions/upload-artifact',1)[1].split('\\n      - ',1)[0]
           assert 'pull_request_' + 'target' not in p+a+s
           assert 'runs-on: self-' + 'hosted' not in p+a+s
           assert 'workflow_dispatch:' in s
@@ -49,6 +49,11 @@ jobs:
           assert 'MegaMonitor/contents/package.json?ref=main' in s
           assert 'MMcrm-Infrastructure/contents/ops/updates/mmcrm-deploy-authorization.py?ref=main' in s
           assert 'ssh' not in s.lower() and 'deploy_host' not in s.lower()
+          assert 'permission-statuses: read' in p
+          assert 'permission-checks: read' in p
+          assert 'permission-statuses: write' not in p
+          assert 'permission-checks: write' not in p
+          assert 'SOURCE_API_FAILED endpoint=' in p
           print('BROKER_WORKFLOW_STATIC_GUARDS_OK')
           PY
 
@@ -65,7 +70,7 @@ jobs:
           if ($PSVersionTable.PSVersion.Major -ne 5) { throw 'Expected Windows PowerShell 5.1.' }
           python --version
           if (-not (Get-Command ssh-keygen -ErrorAction SilentlyContinue)) { throw 'OpenSSH ssh-keygen is required for signing regressions.' }
-          python -m py_compile ops/broker/guard.py ops/broker/fetch_source.py ops/broker/authorize.py ops/broker/vps_authorization_reference.py tests/test_broker_guard.py tests/test_source_app_workflow.py
+          python -m py_compile ops/broker/guard.py ops/broker/fetch_source.py ops/broker/authorize.py ops/broker/vps_authorization_reference.py tests/test_broker_guard.py tests/test_source_app_workflow.py tests/test_preflight_workflow.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest discover -s tests -p 'test_*.py' -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

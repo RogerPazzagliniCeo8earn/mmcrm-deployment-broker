@@ -64,7 +64,11 @@ jobs:
               return 1
             fi
           }
-          read_api pr "repos/RogerPazzagliniCeo8earn/MegaMonitor/pulls/$APP_PR"
+          if ! gh api "repos/RogerPazzagliniCeo8earn/MegaMonitor/pulls/$APP_PR" |
+            jq -c '{number, state, draft, base: {ref: .base.ref}, head: {sha: .head.sha, repo: {full_name: .head.repo.full_name}}}' > "$RUNNER_TEMP/pr.json"; then
+            echo 'SOURCE_API_FAILED endpoint=pr' >&2
+            exit 1
+          fi
           read_api commit "repos/RogerPazzagliniCeo8earn/MegaMonitor/commits/df195e6da70206bdd2e690507558a63eaa3705e5"
           read_api commit_status "repos/RogerPazzagliniCeo8earn/MegaMonitor/commits/df195e6da70206bdd2e690507558a63eaa3705e5/status"
           if ! gh api --paginate --slurp "repos/RogerPazzagliniCeo8earn/MegaMonitor/commits/df195e6da70206bdd2e690507558a63eaa3705e5/check-runs?per_page=100" |

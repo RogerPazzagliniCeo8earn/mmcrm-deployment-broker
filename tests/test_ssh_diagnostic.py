@@ -40,7 +40,7 @@ class SshDiagnosticTests(unittest.TestCase):
             with patch.object(sys, "argv", ["ssh_diagnostic.py", str(err_path), "255", str(out_path)]):
                 with contextlib.redirect_stderr(captured):
                     self.assertEqual(main(), 0)
-            self.assertEqual(captured.getvalue(), "SSH_DIAGNOSTIC category=ssh_authentication\\n")
+            self.assertEqual(captured.getvalue(), "SSH_DIAGNOSTIC category=ssh_authentication\n")
             self.assertNotIn("opaque-secret-value", captured.getvalue())
 
 

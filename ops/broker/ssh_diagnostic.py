@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def classify(stderr: str, exit_code: int, stdout: str = "") -> str:
-    """Return a fixed label; never return or echo any part of stderr."""
+    """Return a fixed label; never return or echo captured process output."""
     lower = stderr.lower()
     if any(marker in lower for marker in (
         "host key verification failed", "remote host identification has changed",
@@ -25,9 +25,10 @@ def classify(stderr: str, exit_code: int, stdout: str = "") -> str:
         "banner exchange:", "connection closed by",
     )):
         return "network_or_ssh_transport"
-    if re.search(r"(?m)^DEPLOY_REJECT reason=[a-z0-9_]+\s*$", stderr):
+    remote_output = stderr + "\n" + stdout
+    if re.search(r"(?m)^DEPLOY_REJECT reason=[a-z0-9_]+\s*$", remote_output):
         return "dispatcher_rejected_request"
-    if re.search(r"(?m)^UPGRADE_ERROR phase=[a-z0-9_-]+ code=[0-9]+\s*$", stderr):
+    if re.search(r"(?m)^UPGRADE_ERROR phase=[a-z0-9_-]+ code=[0-9]+\s*$", remote_output):
         return "remote_controller_failure"
     if re.search(r"(?m)^UPGRADE_RESULT=FAILED phase=[a-z0-9_-]+ exit=[0-9]+(?: .*)?$", remote_output):
         return "remote_controller_failure"
@@ -47,7 +48,11 @@ def main() -> int:
     except OSError:
         print("SSH_DIAGNOSTIC category=diagnostic_capture_unavailable", file=sys.stderr)
         return 2
-    try:\n        stdout = Path(sys.argv[3]).read_bytes().decode("utf-8", errors="replace")\n    except OSError:\n        stdout = ""\n    print(f"SSH_DIAGNOSTIC category={classify(stderr, int(sys.argv[2]), stdout)}", file=sys.stderr)
+    try:
+        stdout = Path(sys.argv[3]).read_bytes().decode("utf-8", errors="replace")
+    except OSError:
+        stdout = ""
+    print(f"SSH_DIAGNOSTIC category={classify(stderr, int(sys.argv[2]), stdout)}", file=sys.stderr)
     return 0
 
 

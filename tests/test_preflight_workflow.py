@@ -61,7 +61,7 @@ class PreflightWorkflowPermissionTests(unittest.TestCase):
 
     def test_preflight_ssh_failure_diagnostic_is_captured_and_redacted(self):
         self.assertIn('ssh_err="$RUNNER_TEMP/preflight.err"', self.workflow)
-        self.assertIn('python3 ops/broker/ssh_diagnostic.py "$ssh_err" "$ssh_rc" >&2 || true', self.workflow)
+        self.assertIn('python3 ops/broker/ssh_diagnostic.py "$ssh_err" "$ssh_rc" "$out" >&2 || true', self.workflow)
         self.assertIn('exit "$ssh_rc"', self.workflow)
         self.assertIn('StrictHostKeyChecking=yes', self.workflow)
         self.assertIn('UserKnownHostsFile="$ssh_dir/known_hosts"', self.workflow)

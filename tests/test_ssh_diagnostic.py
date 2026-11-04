@@ -12,14 +12,16 @@ from ops.broker.ssh_diagnostic import classify, main
 class SshDiagnosticTests(unittest.TestCase):
     def test_host_key_errors(self):
         self.assertEqual(classify("Host key verification failed.", 255), "host_key")
-        self.assertEqual(classify("WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!", 255), "host_key")\n        self.assertEqual(classify("No ED25519 host key is known for example", 255), "host_key")
+        self.assertEqual(classify("WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!", 255), "host_key")
+        self.assertEqual(classify("No ED25519 host key is known for example", 255), "host_key")
 
     def test_authentication_errors(self):
         self.assertEqual(classify("Permission denied (publickey).", 255), "ssh_authentication")
         self.assertEqual(classify('Load key "/tmp/private-key": invalid format', 255), "ssh_authentication")
 
     def test_transport_errors(self):
-        self.assertEqual(classify("ssh: connect to host example port 22: Connection timed out", 255), "network_or_ssh_transport")\n        self.assertEqual(classify("ssh: connect to host example port 22: Operation timed out", 255), "network_or_ssh_transport")
+        self.assertEqual(classify("ssh: connect to host example port 22: Connection timed out", 255), "network_or_ssh_transport")
+        self.assertEqual(classify("ssh: connect to host example port 22: Operation timed out", 255), "network_or_ssh_transport")
         self.assertEqual(classify("kex_exchange_identification: Connection closed by remote host", 255), "network_or_ssh_transport")
 
     def test_dispatcher_and_server_failures_in_stdout_or_stderr(self):

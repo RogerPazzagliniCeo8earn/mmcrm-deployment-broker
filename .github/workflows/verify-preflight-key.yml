@@ -1,0 +1,48 @@
+name: Verify MMcrm Preflight SSH key fingerprint
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-key:
+    if: github.ref == 'refs/heads/main' && github.actor == 'RogerPazzagliniCeo8earn'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Derive and report only the public-key fingerprint
+        env:
+          PREFLIGHT_PRIVATE_KEY: \${{ secrets.MMCRM_PREFLIGHT_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$PREFLIGHT_PRIVATE_KEY" ]] || {
+            echo 'PREFLIGHT_KEY_CHECK_FAILED reason=secret_empty' >&2
+            exit 1
+          }
+          umask 077
+          key_dir="$RUNNER_TEMP/mmcrm-preflight-key-check"
+          install -d -m 0700 "$key_dir"
+          key_file="$key_dir/private-key"
+          error_file="$key_dir/keygen.err"
+          fingerprint_file="$key_dir/fingerprint.txt"
+          cleanup() { rm -f -- "$key_file" "$error_file" "$fingerprint_file"; rmdir -- "$key_dir"; }
+          trap cleanup EXIT
+          printf '%s\n' "$PREFLIGHT_PRIVATE_KEY" > "$key_file"
+          unset PREFLIGHT_PRIVATE_KEY
+          chmod 0600 "$key_file"
+          if ! ssh-keygen -P '' -y -f "$key_file" 2>"$error_file" |
+            ssh-keygen -lf /dev/stdin > "$fingerprint_file" 2>>"$error_file"; then
+            echo 'PREFLIGHT_KEY_CHECK_FAILED reason=invalid_or_encrypted_key' >&2
+            exit 1
+          fi
+          read -r bits fingerprint key_type < <(awk 'NR == 1 {print $1, $2, $NF}' "$fingerprint_file")
+          line_count=$(wc -l < "$fingerprint_file" | tr -d '[:space:]')
+          [[ "$line_count" == 1 && "$bits" == 256 && "$key_type" == '(ED25519)' &&
+             "$fingerprint" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]] || {
+            echo 'PREFLIGHT_KEY_CHECK_FAILED reason=public_key_not_single_ed25519' >&2
+            exit 1
+          }
+          printf 'PREFLIGHT_KEY_FINGERPRINT=%s\n' "$fingerprint"

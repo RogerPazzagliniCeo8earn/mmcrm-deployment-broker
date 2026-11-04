@@ -29,7 +29,7 @@ class PreflightWorkflowPermissionTests(unittest.TestCase):
         self.assertNotRegex(token_block, r"(?m)^          permission-[a-z-]+: write$")
 
     def test_each_api_endpoint_has_its_minimum_read_permission_and_safe_failure_label(self):
-        self.assertIn('read_api pr "repos/RogerPazzagliniCeo8earn/MegaMonitor/pulls/$APP_PR"', self.workflow)
+        self.assertIn('gh api "repos/RogerPazzagliniCeo8earn/MegaMonitor/pulls/$APP_PR" |', self.workflow)
         self.assertIn('read_api commit "repos/RogerPazzagliniCeo8earn/MegaMonitor/commits/df195e6da70206bdd2e690507558a63eaa3705e5"', self.workflow)
         self.assertIn('read_api commit_status "repos/RogerPazzagliniCeo8earn/MegaMonitor/commits/df195e6da70206bdd2e690507558a63eaa3705e5/status"', self.workflow)
         self.assertIn('endpoint=check_runs', self.workflow)
@@ -46,6 +46,16 @@ class PreflightWorkflowPermissionTests(unittest.TestCase):
         self.assertNotIn("permission-workflows:", self.workflow)
         self.assertIn("SSH_PRIVATE_KEY: ${{ secrets.MMCRM_PREFLIGHT_SSH_KEY }}", self.workflow)
         self.assertIn("mmcrm-deploy@$DEPLOY_HOST", self.workflow)
+
+    def test_large_pull_response_is_projected_to_only_guard_required_fields(self):
+        projection = "jq -c '{number, state, draft, base: {ref: .base.ref}, head: {sha: .head.sha, repo: {full_name: .head.repo.full_name}}}'"
+        self.assertIn(projection, self.workflow)
+        self.assertIn('> "$RUNNER_TEMP/pr.json"', self.workflow)
+        for required_field in ("number", "state", "draft", "base.ref", "head.sha", "head.repo.full_name"):
+            with self.subTest(field=required_field):
+                self.assertIn(required_field, projection)
+        guard = (ROOT / "ops/broker/guard.py").read_text(encoding="utf-8")
+        self.assertIn('reject(len(raw) <= 16_384, "input_too_large")', guard)
 
 
 if __name__ == "__main__":

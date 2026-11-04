@@ -102,10 +102,17 @@ jobs:
           printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
           chmod 0600 "$ssh_dir/key" "$ssh_dir/known_hosts"
           out="$RUNNER_TEMP/preflight-challenge.out"
-          printf 'challenge %s %s %s %s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" "$content_sha" "$archive_sha" |
+          ssh_err="$RUNNER_TEMP/preflight.err"
+          if printf 'challenge %s %s %s %s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" "$content_sha" "$archive_sha" |
             ssh -T -i "$ssh_dir/key" -o BatchMode=yes -o IdentitiesOnly=yes \
               -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
-              "mmcrm-deploy@$DEPLOY_HOST" > "$out" 2> "$RUNNER_TEMP/preflight.err"
+              "mmcrm-deploy@$DEPLOY_HOST" > "$out" 2> "$ssh_err"; then
+            :
+          else
+            ssh_rc=$?
+            python3 ops/broker/ssh_diagnostic.py "$ssh_err" "$ssh_rc" >&2 || true
+            exit "$ssh_rc"
+          fi
           grep -Fxq 'UPGRADE_PREFLIGHT_OK source=2440217d20e03e767b90810c1e9968a4dfc2984c target=df195e6da70206bdd2e690507558a63eaa3705e5 service=active bind=loopback database=present config=preserved' "$out" || {
             echo 'Expected read-only preflight marker was not returned.' >&2; exit 1;
           }

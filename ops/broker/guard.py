@@ -112,7 +112,14 @@ def validate_source(pr: dict, status: dict, checks: dict, commit: dict | None = 
     reject(isinstance(head, dict) and head.get("sha") == APP_COMMIT, "source_commit_mismatch")
     repo = head.get("repo") if isinstance(head, dict) else None
     reject(isinstance(repo, dict) and repo.get("full_name") == APP_REPO, "source_repository_mismatch")
-    reject(status.get("state") == "success", "source_status_not_success")
+    status_records = status.get("statuses")
+    reject(isinstance(status_records, list), "source_statuses_invalid")
+    if status_records:
+        reject(
+            all(isinstance(item, dict) and item.get("state") == "success" for item in status_records)
+            and status.get("state") == "success",
+            "source_status_not_success",
+        )
     check_runs = checks.get("check_runs")
     reject(isinstance(check_runs, list) and bool(check_runs), "source_checks_missing")
     reject(checks.get("total_count") == len(check_runs), "source_checks_incomplete")
@@ -148,7 +155,7 @@ def self_test() -> None:
         "base": {"ref": APP_BASE},
         "head": {"sha": APP_COMMIT, "repo": {"full_name": APP_REPO}},
     }
-    status = {"state": "success"}
+    status = {"state": "success", "statuses": [{"state": "success"}]}
     checks = {"total_count": 2, "check_runs": [
         {"status": "completed", "conclusion": "success"},
         {"status": "completed", "conclusion": "success"},

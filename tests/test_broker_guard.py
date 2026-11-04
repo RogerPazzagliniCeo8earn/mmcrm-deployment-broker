@@ -47,7 +47,7 @@ def valid_source():
          "base": {"ref": APP_BASE},
          "head": {"sha": APP_COMMIT, "repo": {"full_name": APP_REPO}}},
         {"commit": {"tree": {"sha": APP_TREE}}},
-        {"state": "success"},
+        {"state": "success", "statuses": [{"state": "success"}]},
         {"total_count": 1, "check_runs": [{"status": "completed", "conclusion": "success"}]},
     )
 
@@ -226,18 +226,49 @@ class BrokerGuardTests(unittest.TestCase):
         with self.assertRaises(Reject):
             validate_run(valid_run(), "654321", "a" * 40)
 
+    def test_accepts_successful_check_runs_when_classic_statuses_are_absent(self):
+        pr, commit, _, checks = valid_source()
+        # GitHub reports aggregate "pending" when no legacy status contexts exist.
+        # The completed, non-empty, all-success check-runs are the positive CI evidence.
+        validate_source(pr, {"state": "pending", "statuses": []}, checks, commit)
+
+    def test_rejects_source_when_no_ci_signal_exists(self):
+        pr, commit, _, _ = valid_source()
+        with self.assertRaises(Reject) as raised:
+            validate_source(pr, {"state": "pending", "statuses": []},
+                            {"total_count": 0, "check_runs": []}, commit)
+        self.assertEqual(raised.exception.reason, "source_checks_missing")
+
+    def test_rejects_malformed_or_non_success_classic_statuses(self):
+        pr, commit, _, checks = valid_source()
+        with self.assertRaises(Reject) as malformed:
+            validate_source(pr, {"state": "success"}, checks, commit)
+        self.assertEqual(malformed.exception.reason, "source_statuses_invalid")
+        for state in ("pending", "failure", "error"):
+            with self.subTest(status=state):
+                status = {"state": state, "statuses": [{"state": state}]}
+                with self.assertRaises(Reject) as raised:
+                    validate_source(pr, status, checks, commit)
+                self.assertEqual(raised.exception.reason, "source_status_not_success")
+        status = {"state": "success", "statuses": [{"state": "success"}, {"state": "failure"}]}
+        with self.assertRaises(Reject) as mixed:
+            validate_source(pr, status, checks, commit)
+        self.assertEqual(mixed.exception.reason, "source_status_not_success")
+
     def test_rejects_draft_changed_source_commit_tree_or_incomplete_checks(self):
         pr, commit, status, checks = valid_source()
         variants = [
             ({**pr, "draft": True}, commit, status, checks),
             ({**pr, "head": {**pr["head"], "sha": "0" * 40}}, commit, status, checks),
             (pr, {"commit": {"tree": {"sha": "0" * 40}}}, status, checks),
-            (pr, commit, {"state": "pending"}, checks),
+            (pr, commit, {"state": "pending", "statuses": [{"state": "pending"}]}, checks),
             (pr, commit, status, {"total_count": 2, "check_runs": checks["check_runs"]}),
             (pr, commit, status, {"total_count": 1, "check_runs": [{"status": "completed", "conclusion": "failure"}]}),
+            (pr, commit, status, {"total_count": 1, "check_runs": [{"status": "completed", "conclusion": "cancelled"}]}),
+            (pr, commit, status, {"total_count": 1, "check_runs": [{"status": "in_progress", "conclusion": None}]}),
         ]
         for source in variants:
-            with self.subTest(source=source[0].get("draft")):
+            with self.subTest(source=source[0].get("draft"), checks=source[3]):
                 with self.assertRaises(Reject):
                     validate_source(source[0], source[2], source[3], source[1])
 

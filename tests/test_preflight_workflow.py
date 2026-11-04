@@ -58,5 +58,23 @@ class PreflightWorkflowPermissionTests(unittest.TestCase):
         self.assertIn('reject(len(raw) <= 16_384, "input_too_large")', guard)
 
 
+
+    def test_preflight_ssh_failure_diagnostic_is_captured_and_redacted(self):
+        self.assertIn('ssh_err="$RUNNER_TEMP/preflight.err"', self.workflow)
+        self.assertIn('python3 ops/broker/ssh_diagnostic.py "$ssh_err" "$ssh_rc" >&2 || true', self.workflow)
+        self.assertIn('exit "$ssh_rc"', self.workflow)
+        self.assertIn('StrictHostKeyChecking=yes', self.workflow)
+        self.assertIn('UserKnownHostsFile="$ssh_dir/known_hosts"', self.workflow)
+        self.assertNotIn('cat "$ssh_err"', self.workflow)
+        self.assertNotIn('tee "$ssh_err"', self.workflow)
+        self.assertNotIn('ssh -v', self.workflow)
+
+    def test_diagnostic_classifier_is_part_of_regression_suite(self):
+        self.assertTrue((ROOT / "ops/broker/ssh_diagnostic.py").is_file())
+        self.assertTrue((ROOT / "tests/test_ssh_diagnostic.py").is_file())
+        ci = (ROOT / ".github/workflows/broker-ci.yml").read_text(encoding="utf-8")
+        self.assertIn("tests/test_ssh_diagnostic.py", ci)
+        self.assertIn("ops/broker/ssh_diagnostic.py", ci)
+
 if __name__ == "__main__":
     unittest.main()

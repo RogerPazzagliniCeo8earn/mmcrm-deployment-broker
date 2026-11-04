@@ -11,7 +11,7 @@ def classify(stderr: str, exit_code: int, stdout: str = "") -> str:
     lower = stderr.lower()
     if any(marker in lower for marker in (
         "host key verification failed", "remote host identification has changed",
-        "no matching host key type found",
+        "no matching host key type found", "host key is known",
     )):
         return "host_key"
     if any(marker in lower for marker in (
@@ -20,7 +20,7 @@ def classify(stderr: str, exit_code: int, stdout: str = "") -> str:
     )):
         return "ssh_authentication"
     if any(marker in lower for marker in (
-        "could not resolve hostname", "connection timed out", "no route to host",
+        "could not resolve hostname", "connection timed out", "operation timed out", "no route to host", "network is unreachable",
         "connection refused", "connection reset", "kex_exchange_identification:",
         "banner exchange:", "connection closed by",
     )):

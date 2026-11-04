@@ -110,7 +110,7 @@ jobs:
             :
           else
             ssh_rc=$?
-            python3 ops/broker/ssh_diagnostic.py "$ssh_err" "$ssh_rc" >&2 || true
+            python3 ops/broker/ssh_diagnostic.py "$ssh_err" "$ssh_rc" "$out" >&2 || true
             exit "$ssh_rc"
           fi
           grep -Fxq 'UPGRADE_PREFLIGHT_OK source=2440217d20e03e767b90810c1e9968a4dfc2984c target=df195e6da70206bdd2e690507558a63eaa3705e5 service=active bind=loopback database=present config=preserved' "$out" || {

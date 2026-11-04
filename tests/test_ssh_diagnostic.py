@@ -23,7 +23,7 @@ class SshDiagnosticTests(unittest.TestCase):
         self.assertEqual(classify("kex_exchange_identification: Connection closed by remote host", 255), "network_or_ssh_transport")
 
     def test_dispatcher_and_server_failures_in_stdout_or_stderr(self):
-        self.assertEqual(classify("DEPLOY_REJECT reason=invalid_challenge_request", 255), "dispatcher_rejected_request")
+        self.assertEqual(classify("", 255, "DEPLOY_REJECT reason=invalid_challenge_request"), "dispatcher_rejected_request")
         self.assertEqual(classify("", 255, "UPGRADE_ERROR phase=preflight code=38"), "remote_controller_failure")
         self.assertEqual(classify("sudo: a password is required", 255), "remote_privilege_or_server_failure")
 

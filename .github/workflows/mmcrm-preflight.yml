@@ -91,6 +91,9 @@ jobs:
           prepared="$RUNNER_TEMP/prepare.log"
           python3 ops/broker/fetch_source.py "$raw"
           python3 private-controller/ops/updates/prepare-mmcrm-pr20-archive.py --prepare "$raw" "$archive" > "$prepared"
+          # Normalize gzip header metadata (mtime/original filename) before hashing and signing.
+          gzip -dc "$archive" | gzip -n -c > "$archive.normalized"
+          mv "$archive.normalized" "$archive"
           content_sha=$(sed -n 's/.*content_sha256=\([0-9a-f]\{64\}\).*/\1/p' "$prepared")
           archive_sha=$(sha256sum "$archive" | awk '{print $1}')
           [[ "$content_sha" =~ ^[0-9a-f]{64}$ && "$archive_sha" =~ ^[0-9a-f]{64}$ ]]

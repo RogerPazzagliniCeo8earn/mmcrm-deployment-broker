@@ -184,15 +184,8 @@ jobs:
               "mmcrm-deploy@$DEPLOY_HOST" > "$RUNNER_TEMP/apply.out" 2> "$RUNNER_TEMP/apply.err"; then
             :
           else
-            # Only print a strictly allowlisted machine-readable reason. Never echo
-            # arbitrary remote stderr/stdout: they may contain sensitive data.
-            reason=$(grep -Eo '^(DEPLOY_REJECT|MMCRM_AUTHORIZATION_REJECT) reason=[a-z_]{1,80}
-          grep -Fxq 'UPGRADE_RESULT=SUCCESS app_commit=df195e6da70206bdd2e690507558a63eaa3705e5' "$RUNNER_TEMP/apply.out" || {
-            echo 'Controller success marker was not returned.' >&2; exit 1;
-          }
-          echo 'MMCRM_APPLY_SUCCESS_MARKER_OK; verify installed site and commit separately.' >> "$GITHUB_STEP_SUMMARY"
-          rm -rf "$ssh_dir" "$RUNNER_TEMP/authorization.json" "$RUNNER_TEMP/source-crm-only.tar.gz" "$RUNNER_TEMP/source-real.tar.gz" "$RUNNER_TEMP/prepare.log" "$RUNNER_TEMP/apply.out" "$RUNNER_TEMP/apply.err"
- \
+            # Only print a strictly allowlisted rejection code, never raw remote output.
+            reason=$(grep -Eo '^(DEPLOY_REJECT|MMCRM_AUTHORIZATION_REJECT) reason=[a-z_]{1,80}$' \
               "$RUNNER_TEMP/apply.err" | tail -n 1 || true)
             if [[ -n "$reason" ]]; then
               printf 'MMCRM_APPLY_REMOTE_%s\n' "$reason" >&2

@@ -130,7 +130,8 @@ jobs:
           python3 ops/broker/guard.py --verify-envelope "$RUNNER_TEMP/authorization.json" "$manifest" "$PREFLIGHT_RUN_ID" "$GITHUB_SHA"
           GH_TOKEN="$BROKER_TOKEN" gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$PREFLIGHT_RUN_ID" > "$RUNNER_TEMP/preflight-run.json"
           python3 ops/broker/guard.py --verify-run "$RUNNER_TEMP/preflight-run.json" "$PREFLIGHT_RUN_ID" "$GITHUB_SHA" RogerPazzagliniCeo8earn
-          gh api repos/RogerPazzagliniCeo8earn/MegaMonitor/pulls/20 |\n            jq -c '{number, state, draft, base: {ref: .base.ref}, head: {sha: .head.sha, repo: {full_name: .head.repo.full_name}}}' > "$RUNNER_TEMP/pr.json"
+          gh api repos/RogerPazzagliniCeo8earn/MegaMonitor/pulls/20 |
+            jq -c '{number, state, draft, base: {ref: .base.ref}, head: {sha: .head.sha, repo: {full_name: .head.repo.full_name}}}' > "$RUNNER_TEMP/pr.json"
           gh api repos/RogerPazzagliniCeo8earn/MegaMonitor/commits/df195e6da70206bdd2e690507558a63eaa3705e5 > "$RUNNER_TEMP/commit.json"
           gh api repos/RogerPazzagliniCeo8earn/MegaMonitor/commits/df195e6da70206bdd2e690507558a63eaa3705e5/status > "$RUNNER_TEMP/status.json"
           gh api --paginate --slurp repos/RogerPazzagliniCeo8earn/MegaMonitor/commits/df195e6da70206bdd2e690507558a63eaa3705e5/check-runs?per_page=100 |

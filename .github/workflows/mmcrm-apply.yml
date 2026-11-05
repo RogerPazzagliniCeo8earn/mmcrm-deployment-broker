@@ -195,8 +195,6 @@ jobs:
             fi
             exit 1
           fi
-          grep -Fxq 'UPGRADE_RESULT=SUCCESS app_commit=df195e6da70206bdd2e690507558a63eaa3705e5' "$RUNNER_TEMP/apply.out" || {
-            echo 'Controller success marker was not returned.' >&2; exit 1;
-          }
+          python3 ops/broker/verify_apply_result.py "$RUNNER_TEMP/apply.out"
           echo 'MMCRM_APPLY_SUCCESS_MARKER_OK; verify installed site and commit separately.' >> "$GITHUB_STEP_SUMMARY"
           rm -rf "$ssh_dir" "$RUNNER_TEMP/authorization.json" "$RUNNER_TEMP/source-crm-only.tar.gz" "$RUNNER_TEMP/source-real.tar.gz" "$RUNNER_TEMP/prepare.log" "$RUNNER_TEMP/apply.out" "$RUNNER_TEMP/apply.err"

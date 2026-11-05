@@ -185,8 +185,40 @@ jobs:
             :
           else
             # Only print a strictly allowlisted rejection code, never raw remote output.
-            reason=$(grep -Eo '^(DEPLOY_REJECT|MMCRM_AUTHORIZATION_REJECT) reason=[a-z_]{1,80}$' \
-              "$RUNNER_TEMP/apply.err" | tail -n 1 || true)
+            # Prefer the verifier's specific code over the dispatcher's later
+            # generic authorization_failed code. Never print raw stderr.
+            reason=$(grep -Eo '^MMCRM_AUTHORIZATION_REJECT reason=[a-z_]{1,80}
+            if [[ -n "$reason" ]]; then
+              printf 'MMCRM_APPLY_REMOTE_%s\n' "$reason" >&2
+            else
+              echo 'MMCRM_APPLY_TRANSPORT_OR_REMOTE_FAILURE reason=unclassified (remote output suppressed)' >&2
+            fi
+            exit 1
+          fi
+          grep -Fxq 'UPGRADE_RESULT=SUCCESS app_commit=df195e6da70206bdd2e690507558a63eaa3705e5' "$RUNNER_TEMP/apply.out" || {
+            echo 'Controller success marker was not returned.' >&2; exit 1;
+          }
+          echo 'MMCRM_APPLY_SUCCESS_MARKER_OK; verify installed site and commit separately.' >> "$GITHUB_STEP_SUMMARY"
+          rm -rf "$ssh_dir" "$RUNNER_TEMP/authorization.json" "$RUNNER_TEMP/source-crm-only.tar.gz" "$RUNNER_TEMP/source-real.tar.gz" "$RUNNER_TEMP/prepare.log" "$RUNNER_TEMP/apply.out" "$RUNNER_TEMP/apply.err"
+ \
+              "$RUNNER_TEMP/apply.err" | head -n 1 || true)
+            if [[ -z "$reason" ]]; then
+              reason=$(grep -Eo '^DEPLOY_REJECT reason=[a-z_]{1,80}
+            if [[ -n "$reason" ]]; then
+              printf 'MMCRM_APPLY_REMOTE_%s\n' "$reason" >&2
+            else
+              echo 'MMCRM_APPLY_TRANSPORT_OR_REMOTE_FAILURE reason=unclassified (remote output suppressed)' >&2
+            fi
+            exit 1
+          fi
+          grep -Fxq 'UPGRADE_RESULT=SUCCESS app_commit=df195e6da70206bdd2e690507558a63eaa3705e5' "$RUNNER_TEMP/apply.out" || {
+            echo 'Controller success marker was not returned.' >&2; exit 1;
+          }
+          echo 'MMCRM_APPLY_SUCCESS_MARKER_OK; verify installed site and commit separately.' >> "$GITHUB_STEP_SUMMARY"
+          rm -rf "$ssh_dir" "$RUNNER_TEMP/authorization.json" "$RUNNER_TEMP/source-crm-only.tar.gz" "$RUNNER_TEMP/source-real.tar.gz" "$RUNNER_TEMP/prepare.log" "$RUNNER_TEMP/apply.out" "$RUNNER_TEMP/apply.err"
+ \
+                "$RUNNER_TEMP/apply.err" | tail -n 1 || true)
+            fi
             if [[ -n "$reason" ]]; then
               printf 'MMCRM_APPLY_REMOTE_%s\n' "$reason" >&2
             else

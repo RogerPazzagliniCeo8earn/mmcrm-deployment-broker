@@ -94,6 +94,8 @@ jobs:
           permission-contents: read
           permission-pull-requests: read
           permission-actions: read
+          permission-statuses: read
+          permission-checks: read
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: RogerPazzagliniCeo8earn/MMcrm-Infrastructure
@@ -115,6 +117,7 @@ jobs:
       - name: Revalidate source and regenerate the exact signed archive
         env:
           GH_TOKEN: ${{ steps.source-token.outputs.token }}
+          BROKER_TOKEN: ${{ github.token }}
           PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
           APPROVAL_JSON: ${{ inputs.authorization }}
         shell: bash
@@ -125,7 +128,7 @@ jobs:
           chmod 0600 "$RUNNER_TEMP/authorization.json"
           python3 ops/broker/guard.py --verify-manifest "$manifest" "$PREFLIGHT_RUN_ID" "$GITHUB_SHA"
           python3 ops/broker/guard.py --verify-envelope "$RUNNER_TEMP/authorization.json" "$manifest" "$PREFLIGHT_RUN_ID" "$GITHUB_SHA"
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$PREFLIGHT_RUN_ID" > "$RUNNER_TEMP/preflight-run.json"
+          GH_TOKEN="$BROKER_TOKEN" gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$PREFLIGHT_RUN_ID" > "$RUNNER_TEMP/preflight-run.json"
           python3 ops/broker/guard.py --verify-run "$RUNNER_TEMP/preflight-run.json" "$PREFLIGHT_RUN_ID" "$GITHUB_SHA" RogerPazzagliniCeo8earn
           gh api repos/RogerPazzagliniCeo8earn/MegaMonitor/pulls/20 > "$RUNNER_TEMP/pr.json"
           gh api repos/RogerPazzagliniCeo8earn/MegaMonitor/commits/df195e6da70206bdd2e690507558a63eaa3705e5 > "$RUNNER_TEMP/commit.json"

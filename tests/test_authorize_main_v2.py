@@ -29,7 +29,7 @@ class MainV2SigningTests(unittest.TestCase):
             for field,bad in [
                 ("format",1),("app_ref","pr20"),("old_commit","0"*40),
                 ("app_commit","0"*40),("app_tree","0"*40),
-                ("archive_sha256","0"*64),("expires_at",int(time.time())-1),
+                ("archive_sha256","invalid-hash"),("expires_at",int(time.time())-1),
             ]:
                 changed=dict(value); changed[field]=bad
                 path.write_text(json.dumps(changed,sort_keys=True,separators=(",",":"))+"\n")

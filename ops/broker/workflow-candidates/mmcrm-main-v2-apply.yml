@@ -1,0 +1,206 @@
+name: CANDIDATE MMcrm integrated-main v2 apply (inactive)
+
+# INACTIVE TEMPLATE. Do not promote without coordinated live v2 dispatcher installation.
+# Owner-signed approval remains a mandatory external step.
+on:
+  workflow_dispatch:
+    inputs:
+      preflight_run_id:
+        description: Successful Preflight run whose challenge you signed locally
+        required: true
+        type: string
+      authorization:
+        description: One-line signed authorization JSON produced by authorize.py
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mmcrm-apply-${{ inputs.preflight_run_id }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/main' && github.actor == 'RogerPazzagliniCeo8earn'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Validate preflight identity, challenge, and signed payload binding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+          APPROVAL_JSON: ${{ inputs.authorization }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PREFLIGHT_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]]
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$PREFLIGHT_RUN_ID" > "$RUNNER_TEMP/preflight-run.json"
+          mkdir -m 0700 "$RUNNER_TEMP/preflight-manifest"
+          printf '%s' "$APPROVAL_JSON" > "$RUNNER_TEMP/authorization.json"
+          chmod 0600 "$RUNNER_TEMP/authorization.json"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mmcrm-preflight-${{ inputs.preflight_run_id }}
+          run-id: ${{ inputs.preflight_run_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          path: ${{ runner.temp }}/preflight-manifest
+      - name: Check the immutable Preflight and authorization envelope
+        env:
+          PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="$RUNNER_TEMP/preflight-manifest/deployment-manifest.json"
+          python3 ops/broker/main_release_gate_v2.py --run "$RUNNER_TEMP/preflight-run.json" "$PREFLIGHT_RUN_ID" "$GITHUB_SHA"
+          python3 ops/broker/main_release_gate_v2.py --manifest "$manifest" "$PREFLIGHT_RUN_ID" "$GITHUB_SHA"
+          python3 ops/broker/main_release_gate_v2.py --envelope "$RUNNER_TEMP/authorization.json" "$manifest" "$PREFLIGHT_RUN_ID" "$GITHUB_SHA"
+          python3 - "$manifest" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json,sys
+          m=json.load(open(sys.argv[1],encoding="utf-8"))
+          print("## Signed MMcrm Apply request\n")
+          print(f"- Preflight run: `{m['preflight_run_id']}`")
+          print(f"- Broker commit: `{m['broker_sha']}`")
+          print(f"- Source ref: `{m['app_ref']}`; previous commit: `{m['old_commit']}`")
+          print(f"- Application commit: `{m['app_commit']}`")
+          print(f"- Application tree: `{m['app_tree']}`")
+          print(f"- VPS preflight SHA-256: `{m['preflight_sha256']}`")
+          print(f"- CRM-only content SHA-256: `{m['content_sha256']}`")
+          print(f"- CRM-only archive SHA-256: `{m['archive_sha256']}`")
+          print("\nThe fixed VPS verifier consumes this authorization once and applies only the signed archive hash.")
+          PY
+          rm -f "$RUNNER_TEMP/authorization.json"
+
+  apply:
+    needs: validate
+    if: github.ref == 'refs/heads/main' && github.actor == 'RogerPazzagliniCeo8earn'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/create-github-app-token@67018539274d69449ef7c02e8e71183d1719ab42 # v2.1.4
+        id: source-token
+        with:
+          app-id: ${{ vars.MMCRM_SOURCE_APP_ID }}
+          private-key: ${{ secrets.MMCRM_SOURCE_APP_PRIVATE_KEY }}
+          owner: RogerPazzagliniCeo8earn
+          repositories: MegaMonitor,MMcrm-Infrastructure
+          permission-contents: read
+          permission-pull-requests: read
+          permission-actions: read
+          permission-statuses: read
+          permission-checks: read
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: RogerPazzagliniCeo8earn/MMcrm-Infrastructure
+          ref: bda5251e71d9b499f300a100cd5dfea937ed4187
+          token: ${{ steps.source-token.outputs.token }}
+          path: private-controller
+          sparse-checkout: |
+            ops/updates/prepare-mmcrm-main-archive.py
+            ops/updates/mmcrm-deploy-manifest.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mmcrm-preflight-${{ inputs.preflight_run_id }}
+          run-id: ${{ inputs.preflight_run_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          path: ${{ runner.temp }}/preflight-manifest
+      - name: Revalidate source and regenerate the exact signed archive
+        env:
+          GH_TOKEN: ${{ steps.source-token.outputs.token }}
+          BROKER_TOKEN: ${{ github.token }}
+          PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+          APPROVAL_JSON: ${{ inputs.authorization }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="$RUNNER_TEMP/preflight-manifest/deployment-manifest.json"
+          printf '%s' "$APPROVAL_JSON" > "$RUNNER_TEMP/authorization.json"
+          chmod 0600 "$RUNNER_TEMP/authorization.json"
+          python3 ops/broker/main_release_gate_v2.py --manifest "$manifest" "$PREFLIGHT_RUN_ID" "$GITHUB_SHA"
+          python3 ops/broker/main_release_gate_v2.py --envelope "$RUNNER_TEMP/authorization.json" "$manifest" "$PREFLIGHT_RUN_ID" "$GITHUB_SHA"
+          GH_TOKEN="$BROKER_TOKEN" gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$PREFLIGHT_RUN_ID" > "$RUNNER_TEMP/preflight-run.json"
+          python3 ops/broker/main_release_gate_v2.py --run "$RUNNER_TEMP/preflight-run.json" "$PREFLIGHT_RUN_ID" "$GITHUB_SHA"
+          repo='repos/RogerPazzagliniCeo8earn/MegaMonitor'
+          gh api "$repo/branches/main" > "$RUNNER_TEMP/source-branch.json"
+          gh api "$repo/commits/715a40139f2951f2e499b2169a05089ada3e214e" > "$RUNNER_TEMP/source-commit.json"
+          gh api "$repo/commits/715a40139f2951f2e499b2169a05089ada3e214e/status" > "$RUNNER_TEMP/source-status.json"
+          gh api --paginate --slurp "$repo/commits/715a40139f2951f2e499b2169a05089ada3e214e/check-runs?per_page=100" |
+            jq '{total_count: ([.[].total_count] | add), check_runs: [.[].check_runs[]]}' > "$RUNNER_TEMP/source-checks.json"
+          gh api "repos/RogerPazzagliniCeo8earn/MegaMonitor/actions/runs/42214127219" > "$RUNNER_TEMP/source-ci-run.json"
+          python3 ops/broker/main_release_source.py --verify \
+            "$RUNNER_TEMP/source-branch.json" "$RUNNER_TEMP/source-commit.json" \
+            "$RUNNER_TEMP/source-status.json" "$RUNNER_TEMP/source-checks.json" \
+            "$RUNNER_TEMP/source-ci-run.json"
+          raw="$RUNNER_TEMP/source-real.tar.gz"
+          archive="$RUNNER_TEMP/source-crm-only.tar.gz"
+          prepared="$RUNNER_TEMP/prepare.log"
+          python3 ops/broker/fetch_source_main_v2.py "$raw"
+          python3 private-controller/ops/updates/prepare-mmcrm-main-archive.py --prepare "$raw" "$archive" > "$prepared"
+          # Normalize gzip header metadata (mtime/original filename) before hashing and signing.
+          gzip -dc "$archive" | gzip -n -c > "$archive.normalized"
+          mv "$archive.normalized" "$archive"
+          content_sha=$(sed -n 's/.*content_sha256=\([0-9a-f]\{64\}\).*/\1/p' "$prepared")
+          archive_sha=$(sha256sum "$archive" | awk '{print $1}')
+          expected_content=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["content_sha256"])' "$manifest")
+          expected_archive=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive_sha256"])' "$manifest")
+          [[ "$content_sha" == "$expected_content" && "$archive_sha" == "$expected_archive" ]] || {
+            echo 'Regenerated archive does not match the signed Preflight challenge.' >&2; exit 1;
+          }
+          echo "MMCRM_ARCHIVE_REGENERATED_OK commit=715a40139f2951f2e499b2169a05089ada3e214e content_sha256=$content_sha archive_sha256=$archive_sha" >> "$GITHUB_STEP_SUMMARY"
+      - name: Apply through the fixed signature-verifying dispatcher
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.MMCRM_APPLY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.MMCRM_SSH_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.MMCRM_DEPLOY_HOST }}
+          APPROVAL_JSON: ${{ inputs.authorization }}
+          PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$SSH_PRIVATE_KEY" && -n "$SSH_KNOWN_HOSTS" && -n "$DEPLOY_HOST" ]]
+          manifest="$RUNNER_TEMP/preflight-manifest/deployment-manifest.json"
+          python3 - "$manifest" "$RUNNER_TEMP/authorization.json" <<'PY'
+          import sys
+          from pathlib import Path
+          Path(sys.argv[2]).write_text(__import__("json").dumps(__import__("json").loads(__import__("os").environ["APPROVAL_JSON"]),sort_keys=True,separators=(",",":"))+"\n",encoding="utf-8")
+          PY
+          python3 ops/broker/main_release_gate_v2.py --envelope "$RUNNER_TEMP/authorization.json" "$manifest" "$PREFLIGHT_RUN_ID" "$GITHUB_SHA"
+          # Dispatcher decodes one transport layer; root verifier expects the inner base64 envelope.
+          grant_b64=$(base64 -w0 "$RUNNER_TEMP/authorization.json" | base64 -w0)
+          umask 077
+          ssh_dir="$RUNNER_TEMP/mmcrm-apply-ssh"
+          install -d -m 0700 "$ssh_dir"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 0600 "$ssh_dir/key" "$ssh_dir/known_hosts"
+          if { printf 'apply %s\n' "$grant_b64"; cat "$RUNNER_TEMP/source-crm-only.tar.gz"; } |
+            ssh -T -i "$ssh_dir/key" -o BatchMode=yes -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+              "mmcrm-deploy@$DEPLOY_HOST" > "$RUNNER_TEMP/apply.out" 2> "$RUNNER_TEMP/apply.err"; then
+            :
+          else
+            # Only print a strictly allowlisted rejection code, never raw remote output.
+            reason=$(grep -Eo '^(DEPLOY_REJECT|MMCRM_AUTHORIZATION_REJECT) reason=[a-z_]{1,80}$' \
+              "$RUNNER_TEMP/apply.err" | head -n 1 || true)
+            if [[ -n "$reason" ]]; then
+              printf 'MMCRM_APPLY_REMOTE_%s\n' "$reason" >&2
+            else
+              echo 'MMCRM_APPLY_TRANSPORT_OR_REMOTE_FAILURE reason=unclassified (remote output suppressed)' >&2
+            fi
+            exit 1
+          fi
+          python3 ops/broker/verify_apply_result_main_v2.py "$RUNNER_TEMP/apply.out"
+          echo 'MMCRM_APPLY_SUCCESS_MARKER_OK; verify installed site and commit separately.' >> "$GITHUB_STEP_SUMMARY"
+          rm -rf "$ssh_dir" "$RUNNER_TEMP/authorization.json" "$RUNNER_TEMP/source-crm-only.tar.gz" "$RUNNER_TEMP/source-real.tar.gz" "$RUNNER_TEMP/prepare.log" "$RUNNER_TEMP/apply.out" "$RUNNER_TEMP/apply.err"

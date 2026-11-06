@@ -22,6 +22,7 @@ jobs:
           python3 -m py_compile ops/broker/*.py tests/test_broker_guard.py tests/test_source_app_workflow.py tests/test_preflight_workflow.py tests/test_ssh_diagnostic.py tests/test_apply_result.py ops/broker/ssh_diagnostic.py ops/broker/verify_apply_result.py
           python3 -m unittest discover -s tests -p 'test_*.py' -v
           python3 ops/broker/guard.py --self-test
+          python3 -m unittest tests/test_authorize_main_v2.py -v
           python3 - <<'PY'
           from pathlib import Path
           import re

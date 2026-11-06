@@ -63,3 +63,30 @@ def validate_main_source(branch: dict, commit: dict, statuses: dict, checks: dic
     require(isinstance(run.get("id"), int) and run["id"] > 0, "source_run_id_invalid")
     require(isinstance(run.get("head_sha"), str) and SHA40.fullmatch(run["head_sha"]) is not None,
             "source_run_sha_invalid")
+
+def main()->int:
+    """Validate a complete set of GitHub API JSON responses."""
+    import argparse
+    import json
+    import sys
+    from pathlib import Path
+    ap=argparse.ArgumentParser()
+    ap.add_argument("--verify",nargs=5,metavar=("BRANCH","COMMIT","STATUS","CHECKS","RUN"),required=True)
+    args=ap.parse_args()
+    try:
+        data=[]
+        for file in args.verify:
+            raw=Path(file).read_bytes()
+            require(len(raw)<=4*1024*1024,"api_input_too_large")
+            obj=json.loads(raw)
+            require(isinstance(obj,dict),"api_object_required")
+            data.append(obj)
+        validate_main_source(*data)
+        print("MMCRM_MAIN_SOURCE_OK commit="+APP_COMMIT)
+        return 0
+    except (Reject,OSError,ValueError,UnicodeError) as exc:
+        print("MMCRM_MAIN_SOURCE_REJECT",file=sys.stderr)
+        return 1
+
+if __name__=="__main__":
+    raise SystemExit(main())

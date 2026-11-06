@@ -88,7 +88,7 @@ def main() -> int:
         fetch(os.environ.get("GH_TOKEN", ""), sys.argv[1])
         return 0
     except Reject as exc:
-        print(f"BROKER_REJECT reason={exc.reason}", file=sys.stderr)
+        print(f"BROKER_REJECT reason={str(exc)}", file=sys.stderr)
         return 1
 
 

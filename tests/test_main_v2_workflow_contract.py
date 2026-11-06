@@ -6,7 +6,7 @@ SRC=ROOT/"ops/broker/workflow-candidates"
 PRE=SRC/"mmcrm-main-v2-preflight.yml"
 APP=SRC/"mmcrm-main-v2-apply.yml"
 SHA="715a40139f2951f2e499b2169a05089ada3e214e"
-INFRA="4d9202819a64e9d5823aae3b471d8531aee02be7"
+INFRA="bda5251e71d9b499f300a100cd5dfea937ed4187"
 
 class CandidateV2WorkflowContracts(unittest.TestCase):
     def test_models_are_not_active_workflows(self):

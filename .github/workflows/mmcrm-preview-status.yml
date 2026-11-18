@@ -1,0 +1,59 @@
+name: MMcrm preview service status
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: mmcrm-preview-service-status
+  cancel-in-progress: false
+
+jobs:
+  service-status:
+    if: github.ref == 'refs/heads/main' && github.actor == 'RogerPazzagliniCeo8earn' && github.triggering_actor == 'RogerPazzagliniCeo8earn'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    environment: mmcrm-diagnostics
+    steps:
+      - name: Read preview service state
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.MMCRM_DIAGNOSTICS_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.MMCRM_DIAGNOSTICS_KNOWN_HOSTS }}
+          SSH_HOST: 195.231.83.244
+        run: |
+          set -euo pipefail
+          : "${SSH_PRIVATE_KEY:?Missing diagnostic SSH key}"
+          : "${SSH_KNOWN_HOSTS:?Missing verified diagnostic host key}"
+          : "${SSH_HOST:?Missing diagnostic host}"
+          [[ "$SSH_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+
+          umask 077
+          ssh_dir=$(mktemp -d)
+          trap 'rm -rf -- "$ssh_dir"' EXIT
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          unset SSH_PRIVATE_KEY SSH_KNOWN_HOSTS
+
+          # The server forces the single allowed command. Send no remote command.
+          if ! timeout 20s ssh -F /dev/null -n -T -i "$ssh_dir/key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
+            -o ConnectTimeout=10 -o ClearAllForwardings=yes \
+            -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            "mmcrm-diagnostics@$SSH_HOST" > "$ssh_dir/status" 2> "$ssh_dir/error"; then
+            echo 'Diagnostic SSH failed. Check routing, host key and dedicated identity.' >&2
+            exit 1
+          fi
+
+          # Validate all output before publishing it in the public broker's run log.
+          if ! awk -F= '
+            NF != 2 || $1 !~ /^(LoadState|ActiveState|SubState)$/ || $2 !~ /^[a-z][a-z0-9-]*$/ { exit 1 }
+            seen[$1]++ { exit 1 }
+            END { if (NR != 3) exit 1 }
+          ' "$ssh_dir/status"; then
+            echo 'Unexpected service status response.' >&2
+            exit 1
+          fi
+          cat "$ssh_dir/status"
